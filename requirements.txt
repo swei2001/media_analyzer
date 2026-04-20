@@ -1,0 +1,40 @@
+# ============================================================
+# requirements.txt
+# GPU: NVIDIA H200 | Driver: 570.133.20 | CUDA: 12.8
+# Models: Qwen3-VL-8B-Instruct + whisper-large-v3
+# ============================================================
+
+# --- PyTorch (CUDA 12.8) ---
+# 安装时需指定 index-url，不能直接 pip install -r requirements.txt
+# 请先单独执行：
+# pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
+#   --index-url https://download.pytorch.org/whl/cu128
+
+# --- Qwen3-VL-8B-Instruct ---
+transformers>=4.57.0
+accelerate>=1.0.0
+qwen-vl-utils>=0.0.8
+Pillow>=10.0.0
+
+# --- Flash Attention 2（强烈推荐，节省显存 + 加速）---
+# flash-attn>=2.7.0
+
+# --- whisper-large-v3 (via faster-whisper，推荐) ---
+faster-whisper>=1.1.0
+ctranslate2>=4.5.0
+
+# --- 或者用 HuggingFace Transformers 原版 whisper ---
+openai-whisper>=20231117
+datasets>=2.14.0
+
+# --- 音频处理 ---
+soundfile>=0.12.1
+librosa>=0.10.0
+ffmpeg-python>=0.2.0
+
+# --- 通用依赖 ---
+numpy>=1.26.0
+huggingface-hub>=0.24.0
+safetensors>=0.4.0
+sentencepiece>=0.2.0
+tiktoken>=0.7.0
