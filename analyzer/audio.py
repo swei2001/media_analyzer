@@ -1,103 +1,72 @@
-import whisper
-from pathlib import Path
-import warnings
+import torch
+from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline as hf_pipeline
 
 
-def _resolve_device(requested: str) -> tuple[str, str]:
-    import torch
-
+def _resolve_device(requested: str) -> str:
     if requested == "auto":
-        cuda_warning = ""
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter("always")
-            cuda_available = torch.cuda.is_available()
-        if caught:
-            cuda_warning = str(caught[-1].message)
-
-        if cuda_available:
-            return "cuda", "检测到可用 CUDA"
+        if torch.cuda.is_available():
+            return "cuda"
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            return "mps", "未检测到可用 CUDA，回退到 MPS"
-        if cuda_warning:
-            return "cpu", f"CUDA 不可用（{cuda_warning}），回退到 CPU"
-        return "cpu", "未检测到可用 CUDA/MPS，回退到 CPU"
-
+            return "mps"
+        return "cpu"
     if requested == "cuda" and not torch.cuda.is_available():
         raise ValueError("配置了 device=cuda，但当前环境未检测到 CUDA")
     if requested == "mps":
-        has_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-        if not has_mps:
+        if not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
             raise ValueError("配置了 device=mps，但当前环境不支持 MPS")
+    return requested
 
-    return requested, f"按配置使用 device={requested}"
+
+def _select_dtype(device: str, requested: str) -> torch.dtype:
+    dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+    dtype = dtype_map.get(requested, torch.float16)
+    # bfloat16 在 CPU/MPS 上部分算子不支持，回退 float32
+    if device in ("cpu", "mps") and dtype == torch.bfloat16:
+        return torch.float32
+    return dtype
 
 
 class AudioModel:
     def __init__(self, config: dict):
         self.config = config
-        self._model = None
+        self._pipe = None
 
     def _load(self):
-        if self._model is None:
-            model_spec = str(self.config["model"]["whisper_model"]).strip()
-            device, reason = _resolve_device(self.config["model"].get("device", "auto"))
-            available = set(whisper.available_models())
-            model_path = Path(model_spec).expanduser()
+        if self._pipe is not None:
+            return
 
-            print(f"[AudioModel] 加载 Whisper {model_spec} (device={device}) ...")
-            print(f"[AudioModel] 设备选择: {reason}")
+        model_spec = str(self.config["model"]["whisper_model"]).strip()
+        device = _resolve_device(self.config["model"].get("device", "auto"))
+        dtype = _select_dtype(device, self.config["model"].get("torch_dtype", "float16"))
 
-            if model_path.is_dir():
-                named_pt = model_path / f"{model_path.name}.pt"
-                if named_pt.is_file():
-                    model_path = named_pt
-                else:
-                    pt_files = sorted(model_path.glob("*.pt"))
-                    if len(pt_files) == 1:
-                        model_path = pt_files[0]
-                    elif model_path.name in available:
-                        self._model = whisper.load_model(
-                            model_path.name,
-                            device=device,
-                            download_root=str(model_path.parent),
-                        )
-                        return
-                    else:
-                        raise ValueError(
-                            "whisper_model 指向目录，但目录下未找到可用 .pt 文件；"
-                            "请改为 Whisper 模型名（如 large-v3）或 .pt 文件路径。"
-                        )
+        print(f"[AudioModel] 加载 Whisper {model_spec} (device={device}, dtype={dtype}) ...")
 
-            if model_path.is_file():
-                import torch
+        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+            model_spec,
+            torch_dtype=dtype,
+            low_cpu_mem_usage=True,
+        )
+        model.to(device)
+        processor = AutoProcessor.from_pretrained(model_spec)
 
-                checkpoint = torch.load(str(model_path), map_location="cpu", weights_only=False)
-                dims = whisper.ModelDimensions(**checkpoint["dims"])
-                self._model = whisper.Whisper(dims)
-                self._model.load_state_dict(checkpoint["model_state_dict"])
-                self._model = self._model.to(device)
-            elif model_spec in available:
-                self._model = whisper.load_model(model_spec, device=device)
-            elif model_path.name in available:
-                # 路径形如 /data/models/large-v3，模型文件在父目录下 large-v3.pt
-                self._model = whisper.load_model(
-                    model_path.name, device=device, download_root=str(model_path.parent)
-                )
-            else:
-                raise ValueError(
-                    f"不支持的 whisper_model: {model_spec}；可用模型名: {sorted(available)}"
-                )
+        self._pipe = hf_pipeline(
+            "automatic-speech-recognition",
+            model=model,
+            tokenizer=processor.tokenizer,
+            feature_extractor=processor.feature_extractor,
+            torch_dtype=dtype,
+            device=device,
+            chunk_length_s=30,
+        )
+        print("[AudioModel] 模型加载完成")
 
     def transcribe(self, audio_path: str) -> str:
         """返回转写文本，失败时返回空字符串。"""
         self._load()
         language = self.config["audio"].get("language")
         try:
-            result = self._model.transcribe(
-                audio_path,
-                language=language,
-                verbose=False,
-            )
+            kwargs = {"generate_kwargs": {"language": language}} if language else {}
+            result = self._pipe(audio_path, **kwargs)
             return result["text"].strip()
         except Exception as e:
             print(f"[AudioModel] 转写失败: {e}")
