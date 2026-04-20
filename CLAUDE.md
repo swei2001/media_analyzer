@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 bash scripts/setup.sh          # Creates .venv, installs deps, checks ffmpeg
-python scripts/download_models.py  # Downloads Qwen2.5-VL-7B (~15 GB) and Whisper large-v3 (~3 GB)
+python scripts/download_models.py  # Downloads Qwen3-VL-2B-Instruct (~4 GB) and Whisper large-v3 (~3 GB)
 ```
 
 ## Running
@@ -34,7 +34,7 @@ Single-file CLI (`analyze.py`) delegates to `MediaAnalyzer` in `analyzer/pipelin
 analyze.py
   └─ analyzer/pipeline.py  (MediaAnalyzer — orchestrator)
       ├─ analyzer/preprocessor.py  (MediaPreprocessor — ffmpeg wrapper)
-      ├─ analyzer/vision.py        (VisionModel — Qwen3-VL-8B-Instruct inference)
+      ├─ analyzer/vision.py        (VisionModel — Qwen3-VL-2B-Instruct inference)
       └─ analyzer/audio.py         (AudioModel — Whisper transcription)
 ```
 

@@ -1,7 +1,7 @@
 # ============================================================
 # requirements.txt
 # GPU: NVIDIA H200 | Driver: 570.133.20 | CUDA: 12.8
-# Models: Qwen3-VL-8B-Instruct + whisper-large-v3
+# Models: Qwen3-VL-2B-Instruct + whisper-large-v3
 # ============================================================
 
 # --- PyTorch (CUDA 12.8) ---
@@ -10,7 +10,7 @@
 # pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
 #   --index-url https://download.pytorch.org/whl/cu128
 
-# --- Qwen3-VL-8B-Instruct ---
+# --- Qwen3-VL-2B-Instruct ---
 transformers>=4.57.0
 accelerate>=1.0.0
 qwen-vl-utils>=0.0.8

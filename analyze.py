@@ -92,7 +92,7 @@ def main():
   python analyze.py video.mp4
   python analyze.py image.jpg --quiet
   python analyze.py audio.mp3 --whisper-model /data/models/large-v3
-  python analyze.py --continue --vision-model /data/models/Qwen3-VL-8B-Instruct
+  python analyze.py --continue --vision-model /data/models/Qwen3-VL-2B-Instruct
         """,
     )
 
@@ -102,7 +102,7 @@ def main():
                         help="交互模式：加载一次模型后持续等待输入")
 
     # 模型
-    parser.add_argument("--vision-model", default="/data/models/Qwen3-VL-8B-Instruct",
+    parser.add_argument("--vision-model", default="/data/models/Qwen3-VL-2B-Instruct",
                         help="视觉模型路径或 HuggingFace ID")
     parser.add_argument("--whisper-model", default="/data/models/large-v3",
                         help="Whisper 模型路径或 HuggingFace ID")
