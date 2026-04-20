@@ -71,13 +71,18 @@ class AudioModel:
             if model_path.is_file():
                 import torch
 
-                checkpoint = torch.load(str(model_path), map_location="cpu")
+                checkpoint = torch.load(str(model_path), map_location="cpu", weights_only=False)
                 dims = whisper.ModelDimensions(**checkpoint["dims"])
                 self._model = whisper.Whisper(dims)
                 self._model.load_state_dict(checkpoint["model_state_dict"])
                 self._model = self._model.to(device)
             elif model_spec in available:
                 self._model = whisper.load_model(model_spec, device=device)
+            elif model_path.name in available:
+                # 路径形如 /data/models/large-v3，模型文件在父目录下 large-v3.pt
+                self._model = whisper.load_model(
+                    model_path.name, device=device, download_root=str(model_path.parent)
+                )
             else:
                 raise ValueError(
                     f"不支持的 whisper_model: {model_spec}；可用模型名: {sorted(available)}"
