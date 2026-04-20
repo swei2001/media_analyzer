@@ -13,7 +13,7 @@ media_analyzer/
 ├── requirements.txt        # Python 依赖
 ├── analyzer/
 │   ├── pipeline.py         # 主流程编排
-│   ├── vision.py           # Qwen2.5-VL 推理封装
+│   ├── vision.py           # Qwen3-VL-8B-Instruct 推理封装
 │   ├── audio.py            # Whisper 转写封装
 │   └── preprocessor.py     # ffmpeg 预处理工具
 ├── scripts/
@@ -48,7 +48,7 @@ python scripts/download_models.py
 
 | 模型 | 大小 | 用途 |
 |------|------|------|
-| Qwen2.5-VL-7B-Instruct | ~15 GB | 视频/图片/文本推理 |
+| Qwen3-VL-8B-Instruct | ~15 GB | 视频/图片/文本推理 |
 | Whisper large-v3 | ~3 GB | 音频转写 |
 
 > 模型保存在 `~/.cache/huggingface/`，下次直接从缓存加载。
@@ -119,7 +119,7 @@ python analyze.py image.png --no-save --quiet
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `model.vision_model` | `Qwen2.5-VL-7B-Instruct` | 视觉模型 HuggingFace ID |
+| `model.vision_model` | `Qwen3-VL-8B-Instruct` | 视觉模型 HuggingFace ID |
 | `model.whisper_model` | `large-v3` | Whisper 模型大小 |
 | `model.device` | `auto` | 推理设备，`auto` 自动选择 GPU |
 | `model.torch_dtype` | `bfloat16` | 精度，GPU 用 `bfloat16`，CPU 用 `float32` |

@@ -32,7 +32,7 @@ video:
 
 audio:
   # Whisper 转写语言，null 为自动检测
-  language: "zh"
+  language: null
   # 是否分离视频音轨进行转写
   extract_audio_from_video: true
 
