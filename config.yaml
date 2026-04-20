@@ -18,7 +18,7 @@ model:
   # 精度：bfloat16（推荐GPU）/ float16 / float32（CPU）
   torch_dtype: "bfloat16"
   # 最大新生成 token 数
-  max_new_tokens: 2048
+  max_new_tokens: 8192
 
 video:
   # 短视频阈值（秒），低于此值直接传入模型，无需手动提帧
