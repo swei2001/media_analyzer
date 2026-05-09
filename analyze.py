@@ -111,8 +111,8 @@ def main():
     parser.add_argument("--dtype", default="bfloat16",
                         choices=["bfloat16", "float16", "float32"],
                         help="模型精度（默认: bfloat16）")
-    parser.add_argument("--max-new-tokens", type=int, default=8192,
-                        help="最大生成 token 数（默认: 8192）")
+    parser.add_argument("--max-new-tokens", type=int, default=16384,
+                        help="最大生成 token 数（默认: 16384）")
 
     # 视频
     parser.add_argument("--short-video-threshold", type=int, default=180,

@@ -73,17 +73,19 @@ class MediaAnalyzer:
         if duration <= threshold:
             if verbose:
                 print(f"[Pipeline] 短视频（{duration:.0f}s），原生推理中...")
-            return self.vision.analyze_video_native(file_path, transcript)
+            return self.vision.analyze_video_native(file_path, transcript, duration=duration)
         else:
             if verbose:
                 print(f"[Pipeline] 长视频（{duration:.0f}s），提帧推理中...")
             frames = self.preprocessor.extract_frames(file_path)
+            frame_items = self.preprocessor.frame_timestamps(frames)
             if verbose:
                 print(f"[Pipeline] 提取 {len(frames)} 帧")
             return self.vision.analyze_frames(
-                frames,
+                frame_items,
                 transcript=transcript,
                 filename=Path(file_path).name,
+                duration=duration,
             )
 
     def _analyze_audio(self, file_path: str, verbose: bool) -> dict:

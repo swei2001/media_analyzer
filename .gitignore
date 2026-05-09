@@ -5,6 +5,7 @@ demo_media/
 
 # --- Python ---
 __pycache__/
+analyzer/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd

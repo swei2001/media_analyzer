@@ -63,6 +63,23 @@ class MediaPreprocessor:
 
         return [str(f) for f in frames]
 
+    def frame_timestamps(self, frame_paths: list[str]) -> list[tuple[str, float]]:
+        """根据 ffmpeg fps 输出序号估算每张抽帧对应的视频秒数。"""
+        fps = float(self.config["video"]["extract_fps"])
+        if fps <= 0:
+            raise ValueError(f"extract_fps 必须大于 0，当前值: {fps}")
+
+        items = []
+        for frame_path in frame_paths:
+            stem = Path(frame_path).stem
+            try:
+                frame_no = int(stem)
+            except ValueError:
+                frame_no = len(items) + 1
+            second = max(0.0, (frame_no - 1) / fps)
+            items.append((frame_path, second))
+        return items
+
     def extract_audio(self, file_path: str) -> str | None:
         """从视频中提取音轨，返回 wav 路径；若无音轨返回 None。"""
         if not self.config["audio"]["extract_audio_from_video"]:
