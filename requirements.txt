@@ -9,6 +9,9 @@
 # 请先单独执行：
 # pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 
+# --- vLLM (匹配 torch==2.10.0 / CUDA 12.8) ---
+vllm==0.19.1
+
 # --- Qwen3-VL-2B-Instruct ---
 transformers>=4.57.0
 accelerate>=1.0.0

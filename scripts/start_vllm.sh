@@ -6,9 +6,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 ENV_NAME="media"
-DEFAULT_MODEL="/data/models/Qwen/Qwen3-VL-2B-Instruct"
+DEFAULT_MODEL="/data/models/Qwen3-VL-4B-Instruct"
 MODEL="${1:-$DEFAULT_MODEL}"
-PORT="${PORT:-8000}"
+HOST="${HOST:-127.0.0.1}"
+PORT="${PORT:-8011}"
 
 # ── 激活 Conda 环境 ──────────────────────────────────────────────────────────
 if ! command -v conda &> /dev/null; then
@@ -36,7 +37,7 @@ echo "================================================"
 echo " 启动 vLLM 服务"
 echo " 模型: $MODEL"
 echo " Conda 环境: $ENV_NAME"
-echo " 地址: http://localhost:$PORT"
+echo " 地址: http://$HOST:$PORT"
 echo "================================================"
 
 # ── 检测可用 GPU 显存，自动选择 dtype ────────────────────────────────────────
@@ -62,8 +63,9 @@ else
 fi
 
 vllm serve "$MODEL" \
+    --host "$HOST" \
     --port "$PORT" \
     --dtype "$DTYPE" \
     --max-model-len 32768 \
-    --limit-mm-per-prompt "image=64,video=1" \
+    --limit-mm-per-prompt '{"image":64,"video":1}' \
     --trust-remote-code

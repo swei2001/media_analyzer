@@ -27,6 +27,7 @@
 - `scripts/setup.sh`：创建或复用 `media` conda 环境，安装 ffmpeg、PyTorch 和 Python 依赖。
 - `scripts/download_models.py`：使用 ModelScope 批量下载模型到 `/data/models`。
 - `scripts/start_vllm.sh`：激活 `media` conda 环境并启动可选 vLLM 服务。
+- `vllm_client.py`：vLLM HTTP 客户端，支持普通文本对话，以及图片/视频/音频路径解析。
 - `demo_media/`：示例媒体文件，已在 `.gitignore` 中忽略。
 
 ## 当前实现流程
@@ -77,8 +78,8 @@ python scripts/download_models.py
 
 ```bash
 python analyze.py --continue \
-  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
-  --whisper-model /data/models/openai-mirror/whisper-large-v3
+  --vision-model /data/models/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 python analyze.py <file_path> [options]
 ```
 
@@ -86,11 +87,11 @@ python analyze.py <file_path> [options]
 
 常见参数：
 
-- `--vision-model`：视觉模型路径或 Hugging Face / 本地模型 ID。推荐使用 `/data/models/Qwen/Qwen3-VL-2B-Instruct`。
-- `--whisper-model`：Whisper 模型路径或 Hugging Face / 本地模型 ID。推荐使用 `/data/models/openai-mirror/whisper-large-v3`。
+- `--vision-model`：视觉模型路径或 Hugging Face / 本地模型 ID。当前代码默认 `/data/models/Qwen3-VL-2B-Instruct`。
+- `--whisper-model`：Whisper 模型路径或 Hugging Face / 本地模型 ID。当前代码默认 `/data/models/large-v3`，常用本地路径为 `/data/models/whisper-large-v3`。
 - `--device`：`auto`、`cuda`、`cpu` 或 `mps`，当前 CLI 默认 `cuda`。
 - `--dtype`：`bfloat16`、`float16` 或 `float32`。
-- `--max-new-tokens`：当前默认 `8192`。
+- `--max-new-tokens`：当前默认 `16384`。
 - `--short-video-threshold`、`--extract-fps`、`--max-frames`、`--max-pixels`：视频处理参数。
 - `--language`、`--no-audio`：音频转写参数。
 - `--output-dir`、`--no-save`、`--quiet`、`--tmp-dir`、`--no-cleanup`：输出和临时文件参数。
@@ -106,8 +107,10 @@ python analyze.py <file_path> [options]
 - 允许运行轻量级静态检查、语法检查或不加载模型的代码检查命令。
 - 当前仓库根目录没有 `config.yaml`。`analyze.py` 使用命令行参数构造内联配置，不读取 `config.yaml`，CLI 也没有 `--config` 参数。
 - `scripts/download_models.py` 依赖 `modelscope`，如果环境中缺少该包，需要在 `media` 环境中安装。
+- `requirements.txt` 固定 `vllm==0.19.1`，匹配 `torch==2.10.0` / CUDA 12.8；不要用未固定版本的 `pip install vllm` 覆盖。
 - `scripts/start_vllm.sh` 依赖 `media` 环境中已安装 `vllm`，不会自动安装 `vllm`。
-- `scripts/start_vllm.sh` 默认模型为 `/data/models/Qwen/Qwen3-VL-2B-Instruct`，也可通过第一个参数指定模型路径；端口可用 `PORT=8001` 这类环境变量覆盖。
+- `scripts/start_vllm.sh` 默认模型为 `/data/models/Qwen3-VL-4B-Instruct`，默认监听 `127.0.0.1:8011`；也可通过第一个参数指定模型路径，通过 `HOST=` 和 `PORT=` 覆盖监听地址。
+- `vllm_client.py` 默认连接 `http://127.0.0.1:8011/v1`，默认模型为 `/data/models/Qwen3-VL-4B-Instruct`，音频路径会先用本地 Whisper 转写再提交给 vLLM。
 - `MediaPreprocessor.get_video_duration()` 没有检查 `ffprobe` 返回码；修改相关逻辑时应考虑异常处理。
 - `VisionModel._load()` 将 `device_map` 直接设为配置中的 `device` 字符串；如调整设备逻辑，注意兼容 `auto`、`cuda`、`cpu`、`mps`。
 - `AudioModel` 当前用 `transformers` ASR pipeline，而不是 `requirements.txt` 注释中的 faster-whisper 主路径。

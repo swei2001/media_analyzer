@@ -45,8 +45,10 @@ The script downloads these models to `/data/models`:
 
 Recommended local paths after download:
 
-- Vision: `/data/models/Qwen/Qwen3-VL-2B-Instruct`
-- Whisper: `/data/models/openai-mirror/whisper-large-v3`
+- Vision CLI default: `/data/models/Qwen3-VL-2B-Instruct`
+- vLLM default: `/data/models/Qwen3-VL-4B-Instruct`
+- Whisper CLI default: `/data/models/large-v3`
+- Common Whisper local path: `/data/models/whisper-large-v3`
 
 ## Running
 
@@ -54,8 +56,8 @@ Prefer interactive mode by default because it loads models once and then handles
 
 ```bash
 python analyze.py --continue \
-  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
-  --whisper-model /data/models/openai-mirror/whisper-large-v3
+  --vision-model /data/models/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 ```
 
 Single-file one-shot mode is also supported:
@@ -79,15 +81,26 @@ There is no `--config` argument and no active `config.yaml` entry point. `analyz
 
 ## Optional vLLM
 
-`scripts/start_vllm.sh` starts an optional vLLM service. It activates the `media` conda environment, defaults to `/data/models/Qwen/Qwen3-VL-2B-Instruct`, and supports a model path argument:
+`scripts/start_vllm.sh` starts an optional vLLM service. It activates the `media` conda environment, defaults to `/data/models/Qwen3-VL-4B-Instruct`, listens on `127.0.0.1:8011`, and supports a model path argument:
 
 ```bash
 bash scripts/start_vllm.sh
-bash scripts/start_vllm.sh /data/models/Qwen/Qwen3-VL-4B-Instruct
-PORT=8001 bash scripts/start_vllm.sh
+bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
+HOST=127.0.0.1 PORT=8011 bash scripts/start_vllm.sh
 ```
 
-The script expects `vllm` to already be installed in the `media` environment. It does not install `vllm` automatically and does not use AWQ quantization.
+The script expects `vllm` to already be installed in the `media` environment. `requirements.txt` pins `vllm==0.19.1`, matching `torch==2.10.0` and CUDA 12.8. The script does not install `vllm` automatically and does not use AWQ quantization.
+
+`vllm_client.py` is a lightweight HTTP client for that service:
+
+```bash
+python vllm_client.py --continue
+python vllm_client.py "hello"
+python vllm_client.py /data/media_analyzer/demo_media/people.jpg
+python vllm_client.py /data/media_analyzer/demo_media/speech_audio.mp3
+```
+
+Text input is handled as chat. Existing image/video/audio paths are parsed into the same JSON shape; audio is transcribed locally with Whisper before the transcript is sent to vLLM.
 
 `analyze.py` currently uses the transformers backend. Switching analysis to vLLM requires changing inference calls in `analyzer/vision.py`.
 

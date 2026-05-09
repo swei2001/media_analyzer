@@ -21,6 +21,7 @@ media_analyzer/
 │   ├── setup.sh            # conda 环境初始化
 │   ├── download_models.py  # 使用 ModelScope 批量下载模型
 │   └── start_vllm.sh       # 启动 vLLM 服务（可选）
+├── vllm_client.py          # vLLM HTTP 客户端（对话/媒体解析）
 ├── results/                # 输出 JSON（自动创建）
 └── tmp/                    # 临时帧/音轨（自动清理）
 ```
@@ -45,7 +46,7 @@ PyTorch 会先按 `requirements.txt` 第 10 行的 CUDA 12.8 命令安装：
 pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
-随后再安装 `requirements.txt` 中剩余依赖。
+随后再安装 `requirements.txt` 中剩余依赖。当前 `requirements.txt` 固定 `vllm==0.19.1`，该版本匹配 `torch==2.10.0`、`torchvision==0.25.0`、`torchaudio==2.10.0` 和 CUDA 12.8；不要直接使用未固定版本的 `pip install vllm` 覆盖它。
 
 ### 第二步：下载模型
 
@@ -53,14 +54,16 @@ pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url htt
 python scripts/download_models.py
 ```
 
-当前脚本使用 ModelScope 下载模型到 `/data/models`：
+当前脚本使用 ModelScope 下载模型到 `/data/models`。脚本会打印每个模型的实际保存路径：
 
-| 模型 | 用途 |
+| ModelScope 模型 ID | 用途 |
 |------|------|
-| `Qwen/Qwen3-VL-2B-Instruct` | 默认视觉/视频/文本推理模型 |
+| `Qwen/Qwen3-VL-2B-Instruct` | 2B 视觉/视频/文本推理模型 |
 | `Qwen/Qwen3-VL-4B-Instruct` | 更大视觉模型备选 |
 | `Qwen/Qwen3-VL-8B-Instruct` | 更大视觉模型备选 |
 | `openai-mirror/whisper-large-v3` | 音频转写 |
+
+当前 CLI 代码默认使用的本地路径是 `/data/models/Qwen3-VL-2B-Instruct` 和 `/data/models/large-v3`。如果你的实际模型保存路径不同，请在命令行显式传入 `--vision-model` 和 `--whisper-model`。
 
 ### 第三步：运行分析
 
@@ -68,16 +71,16 @@ python scripts/download_models.py
 
 ```bash
 python analyze.py --continue \
-  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
-  --whisper-model /data/models/openai-mirror/whisper-large-v3
+  --vision-model /data/models/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 ```
 
 进入交互模式后，输入待分析文件路径：
 
 ```text
 文件路径> /data/media_analyzer/demo_media/BigBuckBunny.mp4
-文件路径> path/to/image.jpg
-文件路径> path/to/audio.wav
+文件路径> /data/media_analyzer/demo_media/people.jpg
+文件路径> /data/media_analyzer/demo_media/speech_audio.mp3
 ```
 
 交互模式会加载一次模型后持续处理多个文件，适合实际使用。输入 `q`、`quit`、`exit` 或按 `Ctrl+C` 退出。
@@ -126,7 +129,7 @@ python analyze.py [file] [options]
                                默认: /data/models/large-v3
   --device DEVICE              auto/cuda/cpu/mps，默认: cuda
   --dtype DTYPE                bfloat16/float16/float32，默认: bfloat16
-  --max-new-tokens N           最大生成 token 数，默认: 8192
+  --max-new-tokens N           最大生成 token 数，默认: 16384
 
 视频:
   --short-video-threshold N    短视频阈值秒数，默认: 180
@@ -151,13 +154,13 @@ python analyze.py [file] [options]
 ```bash
 # 默认推荐：交互模式
 python analyze.py --continue \
-  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
-  --whisper-model /data/models/openai-mirror/whisper-large-v3
+  --vision-model /data/models/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 
 # 指定 4B 模型
 python analyze.py --continue \
-  --vision-model /data/models/Qwen/Qwen3-VL-4B-Instruct \
-  --whisper-model /data/models/openai-mirror/whisper-large-v3
+  --vision-model /data/models/Qwen3-VL-4B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 
 # 仅打印结果，不保存文件
 python analyze.py image.png --no-save --quiet
@@ -199,6 +202,24 @@ python analyze.py video.mp4 --no-audio
 
 ## 高吞吐模式（vLLM，可选）
 
+本项目使用的 vLLM 版本：
+
+```bash
+pip install vllm==0.19.1 --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+该版本与项目推荐的 PyTorch 版本匹配：
+
+```bash
+pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+```
+
+如果 `nvidia-smi` 能看到 GPU，但 Python 看不到 CUDA，先检查当前环境：
+
+```bash
+python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.backends.cuda.is_built()); print(torch.cuda.is_available())"
+```
+
 批量处理场景下可以启动 vLLM 服务：
 
 ```bash
@@ -208,22 +229,50 @@ bash scripts/start_vllm.sh
 默认模型路径：
 
 ```text
-/data/models/Qwen/Qwen3-VL-2B-Instruct
+/data/models/Qwen3-VL-4B-Instruct
 ```
 
 也可以指定模型路径：
 
 ```bash
-bash scripts/start_vllm.sh /data/models/Qwen/Qwen3-VL-4B-Instruct
+bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
 ```
 
-默认端口为 `8000`，可通过环境变量覆盖：
+默认地址为 `http://127.0.0.1:8011`，可通过环境变量覆盖：
 
 ```bash
 PORT=8001 bash scripts/start_vllm.sh
 ```
 
-服务启动后，可通过 OpenAI 兼容接口调用：`http://localhost:8000`。
+服务启动后，可通过 OpenAI 兼容接口调用：`http://127.0.0.1:8011`。
+
+也可以使用项目内的 vLLM 客户端脚本。交互模式下，输入普通文本会进行连续对话；输入存在的图片/视频/音频路径会进行结构化解析。音频会先用本地 Whisper 转写，再把转写文本提交给 vLLM 分析：
+
+```bash
+python vllm_client.py --continue
+```
+
+`vllm_client.py` 的默认配置与 vLLM 启动脚本保持一致：
+
+```text
+base_url: http://127.0.0.1:8011/v1
+model: /data/models/Qwen3-VL-4B-Instruct
+whisper_model: /data/models/whisper-large-v3
+```
+
+单次对话：
+
+```bash
+python vllm_client.py "帮我写个小的科幻故事"
+```
+
+单次解析图片、视频或音频，文件路径建议使用绝对路径：
+
+```bash
+python vllm_client.py /data/media_analyzer/demo_media/people.jpg
+python vllm_client.py /data/media_analyzer/demo_media/holding_phone.mp4
+python vllm_client.py /data/media_analyzer/demo_media/speech_audio.mp3
+```
 
 `analyze.py` 当前仍使用 transformers 后端；如需切换到 vLLM，需要在 `analyzer/vision.py` 中替换推理调用。
 
