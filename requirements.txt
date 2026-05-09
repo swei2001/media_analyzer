@@ -7,8 +7,7 @@
 # --- PyTorch (CUDA 12.8) ---
 # 安装时需指定 index-url，不能直接 pip install -r requirements.txt
 # 请先单独执行：
-# pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 \
-#   --index-url https://download.pytorch.org/whl/cu128
+# pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
 
 # --- Qwen3-VL-2B-Instruct ---
 transformers>=4.57.0

@@ -1,24 +1,25 @@
-# 媒体分析器 — 功能一：单文件解析
+# 媒体分析器 - 功能一：单文件解析
 
-对单个视频、音频、图片文件进行深度分析，输出结构化 JSON（思考过程 / 事件 / 解读）。
+对单个视频、音频、图片文件进行深度分析，输出结构化 JSON，包括思考过程、事件和解读。
+
+本项目只负责功能一：单文件解析。不负责功能二：多模态文件集合解析，也不负责功能三：媒体文件真伪鉴别。
 
 ---
 
 ## 目录结构
 
-```
+```text
 media_analyzer/
 ├── analyze.py              # CLI 入口
-├── config.yaml             # 所有可调参数
 ├── requirements.txt        # Python 依赖
 ├── analyzer/
 │   ├── pipeline.py         # 主流程编排
-│   ├── vision.py           # Qwen3-VL-2B-Instruct 推理封装
+│   ├── vision.py           # Qwen3-VL 推理封装
 │   ├── audio.py            # Whisper 转写封装
-│   └── preprocessor.py     # ffmpeg 预处理工具
+│   └── preprocessor.py     # ffmpeg/ffprobe 预处理工具
 ├── scripts/
-│   ├── setup.sh            # 一键初始化环境
-│   ├── download_models.py  # 预下载模型
+│   ├── setup.sh            # conda 环境初始化
+│   ├── download_models.py  # 使用 ModelScope 批量下载模型
 │   └── start_vllm.sh       # 启动 vLLM 服务（可选）
 ├── results/                # 输出 JSON（自动创建）
 └── tmp/                    # 临时帧/音轨（自动清理）
@@ -31,12 +32,20 @@ media_analyzer/
 ### 第一步：初始化环境
 
 ```bash
-cd media_analyzer
+cd /data/media_analyzer
 bash scripts/setup.sh
-source .venv/bin/activate
+conda activate media
 ```
 
-> 需要 Python ≥ 3.10、ffmpeg。setup.sh 会自动安装 ffmpeg（支持 Homebrew / apt / yum）。
+`scripts/setup.sh` 会创建或复用 `media` conda 环境，Python 版本为 3.12，并安装 ffmpeg 和 Python 依赖。
+
+PyTorch 会先按 `requirements.txt` 第 10 行的 CUDA 12.8 命令安装：
+
+```bash
+pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
+```
+
+随后再安装 `requirements.txt` 中剩余依赖。
 
 ### 第二步：下载模型
 
@@ -44,33 +53,46 @@ source .venv/bin/activate
 python scripts/download_models.py
 ```
 
-首次运行会下载：
+当前脚本使用 ModelScope 下载模型到 `/data/models`：
 
-| 模型 | 大小 | 用途 |
-|------|------|------|
-| Qwen3-VL-2B-Instruct | ~4 GB | 视频/图片/文本推理 |
-| Whisper large-v3 | ~3 GB | 音频转写 |
-
-> 模型保存在 `~/.cache/huggingface/`，下次直接从缓存加载。
+| 模型 | 用途 |
+|------|------|
+| `Qwen/Qwen3-VL-2B-Instruct` | 默认视觉/视频/文本推理模型 |
+| `Qwen/Qwen3-VL-4B-Instruct` | 更大视觉模型备选 |
+| `Qwen/Qwen3-VL-8B-Instruct` | 更大视觉模型备选 |
+| `openai-mirror/whisper-large-v3` | 音频转写 |
 
 ### 第三步：运行分析
 
+推荐默认使用交互模式：
+
 ```bash
-# 分析视频
-python analyze.py /data/media_analyzer/demo_media/BigBuckBunny.mp4
+python analyze.py --continue \
+  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/openai-mirror/whisper-large-v3
+```
 
-# 分析图片
-python analyze.py path/to/image.jpg
+进入交互模式后，输入待分析文件路径：
 
-# 分析音频
-python analyze.py path/to/audio.wav
+```text
+文件路径> /data/media_analyzer/demo_media/BigBuckBunny.mp4
+文件路径> path/to/image.jpg
+文件路径> path/to/audio.wav
+```
+
+交互模式会加载一次模型后持续处理多个文件，适合实际使用。输入 `q`、`quit`、`exit` 或按 `Ctrl+C` 退出。
+
+单次分析也仍然可用：
+
+```bash
+python analyze.py path/to/file.mp4
 ```
 
 ---
 
 ## 输出格式
 
-结果同时打印到终端并保存到 `results/<文件名>_result.json`：
+结果会打印到终端，并在默认情况下保存到 `results/<文件名>_result.json`：
 
 ```json
 {
@@ -88,48 +110,77 @@ python analyze.py path/to/audio.wav
 
 ## 常用参数
 
-```
-python analyze.py <文件> [选项]
+```text
+python analyze.py [file] [options]
 
-选项:
-  --config CONFIG         配置文件路径（默认: config.yaml）
-  --output-dir DIR        结果目录（默认: results）
-  --whisper-model MODEL   Whisper 大小: tiny/base/small/medium/large-v3
-  --device DEVICE         推理设备: auto/cuda/cpu/mps
-  --no-save               不保存结果文件
-  --quiet                 减少日志输出
+位置参数:
+  file                         待分析的媒体文件路径；交互模式下可省略
+
+模式:
+  --continue                   交互模式：加载一次模型后持续等待输入
+
+模型:
+  --vision-model MODEL         视觉模型路径或 Hugging Face / 本地模型 ID
+                               默认: /data/models/Qwen3-VL-2B-Instruct
+  --whisper-model MODEL        Whisper 模型路径或 Hugging Face / 本地模型 ID
+                               默认: /data/models/large-v3
+  --device DEVICE              auto/cuda/cpu/mps，默认: cuda
+  --dtype DTYPE                bfloat16/float16/float32，默认: bfloat16
+  --max-new-tokens N           最大生成 token 数，默认: 8192
+
+视频:
+  --short-video-threshold N    短视频阈值秒数，默认: 180
+  --extract-fps FPS            长视频提帧帧率，默认: 1.0
+  --max-frames N               最大提帧数，默认: 64
+  --max-pixels N               每帧最大像素数，默认: 151200
+
+音频:
+  --language LANG              Whisper 转写语言，留空自动检测
+  --no-audio                   不提取视频音轨转写
+
+输出:
+  --output-dir DIR             结果目录，默认: results
+  --no-save                    不保存结果文件
+  --quiet                      减少日志输出
+  --tmp-dir DIR                临时文件目录，默认: tmp
+  --no-cleanup                 运行结束后保留临时文件
 ```
 
-**示例：**
+示例：
 
 ```bash
-# 使用较小的 Whisper 加快音频转写
-python analyze.py video.mp4 --whisper-model medium
+# 默认推荐：交互模式
+python analyze.py --continue \
+  --vision-model /data/models/Qwen/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/openai-mirror/whisper-large-v3
 
-# Mac M 系列芯片
-python analyze.py video.mp4 --device mps
+# 指定 4B 模型
+python analyze.py --continue \
+  --vision-model /data/models/Qwen/Qwen3-VL-4B-Instruct \
+  --whisper-model /data/models/openai-mirror/whisper-large-v3
 
 # 仅打印结果，不保存文件
 python analyze.py image.png --no-save --quiet
+
+# 不转写视频音轨
+python analyze.py video.mp4 --no-audio
 ```
 
 ---
 
-## 配置说明（config.yaml）
+## 实现流程
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `model.vision_model` | `Qwen3-VL-2B-Instruct` | 视觉模型 HuggingFace ID |
-| `model.whisper_model` | `large-v3` | Whisper 模型大小 |
-| `model.device` | `auto` | 推理设备，`auto` 自动选择 GPU |
-| `model.torch_dtype` | `bfloat16` | 精度，GPU 用 `bfloat16`，CPU 用 `float32` |
-| `model.max_new_tokens` | `2048` | 最大生成 token 数 |
-| `video.short_video_threshold` | `180` | 秒，短于此值直接原生推理 |
-| `video.extract_fps` | `1.0` | 长视频提帧帧率 |
-| `video.max_frames` | `64` | 最大提帧数 |
-| `audio.language` | `zh` | 转写语言，`null` 为自动检测 |
-| `output.save_results` | `true` | 是否保存 JSON 结果 |
-| `tmp.cleanup` | `true` | 分析后自动删除临时文件 |
+`analyze.py` 构造配置字典并调用 `MediaAnalyzer`。当前没有 `config.yaml` 配置入口。
+
+处理逻辑：
+
+1. `MediaPreprocessor.detect_type()` 通过文件扩展名识别图片、视频或音频。
+2. 图片直接调用 `VisionModel.analyze_image()`。
+3. 视频先用 `ffprobe` 获取时长，并按参数决定是否提取音轨转写。
+4. 短视频（默认不超过 180 秒）直接交给视觉模型原生处理。
+5. 长视频通过 `ffmpeg` 提帧后交给视觉模型处理。
+6. 纯音频先用 Whisper 转写，再把文本交给视觉/文本模型做结构化分析。
+7. 默认保存 JSON 到 `results/`，并清理 `tmp/` 下的临时文件。
 
 ---
 
@@ -137,55 +188,57 @@ python analyze.py image.png --no-save --quiet
 
 | 硬件 | 可用性 | 备注 |
 |------|--------|------|
-| RTX 4090 24GB | 推荐 | bfloat16 全精度，速度最快 |
-| RTX 3080 12GB | 可用 | 建议改 `torch_dtype: float16` |
-| RTX 3060 8GB | 勉强 | 需 4-bit 量化（见下文） |
-| Mac M2/M3 32GB | 可用 | `device: mps` |
-| 纯 CPU | 可用 | `torch_dtype: float32`，极慢 |
+| H200 / A100 / RTX 4090 24GB+ | 推荐 | 适合 `bfloat16` 和较大模型 |
+| 12GB-24GB GPU | 可用 | 建议使用 `float16` 或较小模型 |
+| Mac M 系列 | 可用 | 可尝试 `--device mps --dtype float32` |
+| 纯 CPU | 可用 | 速度会很慢，仅建议调试小文件 |
 
-### 8GB VRAM 4-bit 量化（可选）
-
-```bash
-pip install bitsandbytes
-```
-
-修改 `analyzer/vision.py` 的 `_load` 方法，添加：
-
-```python
-from transformers import BitsAndBytesConfig
-quantization_config = BitsAndBytesConfig(load_in_4bit=True)
-self._model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
-    model_name,
-    quantization_config=quantization_config,
-    device_map="auto",
-)
-```
+显存不足时，优先降低 `--max-frames`、降低 `--max-pixels`，或改用更小的视觉模型。
 
 ---
 
 ## 高吞吐模式（vLLM，可选）
 
-批量处理场景下，启动 vLLM 服务可显著提升吞吐量：
+批量处理场景下可以启动 vLLM 服务：
 
 ```bash
 bash scripts/start_vllm.sh
 ```
 
-服务启动后，可通过 OpenAI 兼容接口调用（`http://localhost:8000`）。
-`analyze.py` 目前使用 transformers 后端；如需切换 vLLM 后端，在 `vision.py` 中替换推理调用为 HTTP 请求即可。
+默认模型路径：
+
+```text
+/data/models/Qwen/Qwen3-VL-2B-Instruct
+```
+
+也可以指定模型路径：
+
+```bash
+bash scripts/start_vllm.sh /data/models/Qwen/Qwen3-VL-4B-Instruct
+```
+
+默认端口为 `8000`，可通过环境变量覆盖：
+
+```bash
+PORT=8001 bash scripts/start_vllm.sh
+```
+
+服务启动后，可通过 OpenAI 兼容接口调用：`http://localhost:8000`。
+
+`analyze.py` 当前仍使用 transformers 后端；如需切换到 vLLM，需要在 `analyzer/vision.py` 中替换推理调用。
 
 ---
 
 ## 常见问题
 
 **Q: CUDA out of memory**  
-A: 降低 `video.max_frames`（如改为 32），或将 `model.torch_dtype` 改为 `float16`，或开启 4-bit 量化。
+A: 降低 `--max-frames`，降低 `--max-pixels`，改用更小的视觉模型，或把 `--dtype` 改为 `float16`。
 
-**Q: 模型下载太慢**  
-A: 设置镜像源：`export HF_ENDPOINT=https://hf-mirror.com`，然后重新运行 `download_models.py`。
+**Q: 视频无音轨怎么办？**  
+A: 正常。音轨提取失败时 pipeline 会跳过音频步骤，仅做视觉分析。
 
-**Q: 视频无音轨，Whisper 报错**  
-A: 正常，pipeline 会跳过音频步骤，仅做视觉分析。
+**Q: 输出 JSON 格式错误怎么办？**  
+A: 偶发于模型输出不规范时。相关容错逻辑在 `analyzer/vision.py` 的 `_extract_json()`。
 
-**Q: 输出 JSON 格式错误**  
-A: 偶发于模型输出不规范时。可在 `analyzer/vision.py` 的 `_extract_json` 中增加更强的容错逻辑（如正则提取 `{...}` 块）。
+**Q: `download_models.py` 找不到 `modelscope` 怎么办？**  
+A: 在 `media` 环境中安装：`pip install modelscope`，然后重新运行下载脚本。
