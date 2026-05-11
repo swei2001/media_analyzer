@@ -14,6 +14,7 @@ import argparse
 import base64
 import json
 import mimetypes
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -26,6 +27,7 @@ DEFAULT_WHISPER_MODEL = "/data/models/whisper-large-v3"
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tiff", ".gif"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".webm", ".m4v"}
 AUDIO_EXTS = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"}
+_AUDIO_MODEL_CACHE = {}
 
 SYSTEM_PROMPT = (
     "你是一个专业的媒体内容分析专家，擅长对视频、图片和音频进行深度分析。"
@@ -39,8 +41,29 @@ VISUAL_PROMPT = """请对以下媒体内容进行深度分析，输出严格符�
   "file": "{filename}",
   "思考过程": "<简明分析依据，涵盖视觉线索、音频线索（如有）、时序信息等>",
   "事件": [
-    "<秒数或秒数范围：按时间顺序描述的关键事件1>",
-    "<秒数或秒数范围：关键事件2>"
+    "{event_example_1}",
+    "{event_example_2}"
+  ],
+  "解读": "<综合研判：事件性质、背景、可能影响>"
+}}
+
+时间要求：
+{timing_rule}
+
+要求：只输出上述 JSON 对象；不要输出 markdown；字符串内容保持简洁，避免换行。"""
+
+VIDEO_WITH_AUDIO_PROMPT = """请结合视觉内容和以下音频转写文本，对视频进行深度分析，输出严格符合如下格式的 JSON：
+
+音频转写：
+{transcript}
+
+输出格式（不加 markdown 代码块）：
+{{
+  "file": "{filename}",
+  "思考过程": "<结合视觉与音频的简明分析依据，标注关键时间点>",
+  "事件": [
+    "{event_example_1}",
+    "{event_example_2}"
   ],
   "解读": "<综合研判：事件性质、背景、可能影响>"
 }}
@@ -75,14 +98,37 @@ AUDIO_PROMPT = """以下是音频文件的完整转写内容，请基于文本�
 def _timing_rule(media_type: str) -> str:
     if media_type == "image":
         return (
-            "图片没有真实时间轴；事件字段仍必须以秒数开头。"
-            "若只有一个静态场景，使用 \"0秒：...\"；不要编造持续时长。"
+            "图片没有真实时间轴；事件字段描述画面中的关键静态事实。"
+            "不要以 \"0秒：\"、\"起始秒-结束秒：\" 或任何时间前缀开头；不要编造持续时长。"
         )
     return (
         "事件字段中的每一项都必须以 \"起始秒-结束秒：\" 或 \"某秒：\" 开头，"
         "例如 \"0-8秒：无人机在街道上空盘旋\" 或 \"9秒：车辆发生爆炸\"。"
         "按时间顺序分段，不要输出没有秒数前缀的事件。"
     )
+
+
+def _event_examples(media_type: str) -> tuple[str, str]:
+    if media_type == "image":
+        return (
+            "<画面中的关键事件或事实1>",
+            "<画面中的关键事件或事实2>",
+        )
+    return (
+        "<秒数或秒数范围：按时间顺序描述的关键事件1>",
+        "<秒数或秒数范围：关键事件2>",
+    )
+
+
+def _strip_time_prefix(text: str) -> str:
+    return re.sub(r"^\s*(?:\d+(?:\.\d+)?(?:-\d+(?:\.\d+)?)?秒|[0-9:.]+(?:-[0-9:.]+)?秒?)[:：]\s*", "", text)
+
+
+def _normalize_image_result(result: dict) -> dict:
+    events = result.get("事件")
+    if isinstance(events, list):
+        result["事件"] = [_strip_time_prefix(str(event)) for event in events]
+    return result
 
 
 def _first_json_object(text: str) -> str | None:
@@ -157,6 +203,33 @@ def _audio_config(args: argparse.Namespace) -> dict:
     }
 
 
+def _audio_model_key(args: argparse.Namespace) -> tuple[str, str, str, str]:
+    return (
+        str(args.whisper_model),
+        str(args.whisper_device),
+        str(args.whisper_dtype),
+        str(args.language or ""),
+    )
+
+
+def _get_audio_model(args: argparse.Namespace):
+    from analyzer.audio import AudioModel
+
+    key = _audio_model_key(args)
+    model = _AUDIO_MODEL_CACHE.get(key)
+    if model is None:
+        model = AudioModel(_audio_config(args))
+        _AUDIO_MODEL_CACHE[key] = model
+    return model
+
+
+def _preprocessor_config(args: argparse.Namespace) -> dict:
+    return {
+        "tmp": {"tmp_dir": getattr(args, "tmp_dir", "tmp")},
+        "audio": {"extract_audio_from_video": getattr(args, "extract_audio_from_video", True)},
+    }
+
+
 def _post_json(url: str, payload: dict, timeout: int) -> dict:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
@@ -222,8 +295,17 @@ def analyze_media(path: Path, args: argparse.Namespace) -> dict:
     else:
         raise ValueError(f"不支持的文件格式: {suffix}")
 
-    prompt = VISUAL_PROMPT.format(
+    transcript = ""
+    if media_type == "video":
+        transcript = transcribe_video_audio(path, args)
+
+    event_example_1, event_example_2 = _event_examples(media_type)
+    prompt_template = VIDEO_WITH_AUDIO_PROMPT if transcript else VISUAL_PROMPT
+    prompt = prompt_template.format(
         filename=path.name,
+        transcript=transcript,
+        event_example_1=event_example_1,
+        event_example_2=event_example_2,
         timing_rule=_timing_rule(media_type),
     )
     messages = [
@@ -243,14 +325,36 @@ def analyze_media(path: Path, args: argparse.Namespace) -> dict:
         max_tokens=args.max_tokens,
         timeout=args.timeout,
     )
-    return _extract_json(raw)
+    result = _extract_json(raw)
+    if media_type == "image":
+        result = _normalize_image_result(result)
+    return result
+
+
+def transcribe_video_audio(path: Path, args: argparse.Namespace) -> str:
+    if not getattr(args, "extract_audio_from_video", True):
+        return ""
+
+    from analyzer.preprocessor import MediaPreprocessor
+
+    preprocessor = MediaPreprocessor(_preprocessor_config(args))
+    try:
+        print("[vLLM] 提取视频音轨并转写...")
+        audio_path = preprocessor.extract_audio(str(path))
+        if not audio_path:
+            print("[vLLM] 未提取到音轨，跳过音频分析。")
+            return ""
+        transcript = _get_audio_model(args).transcribe(audio_path)
+        if transcript:
+            print(f"[vLLM] 视频音轨转写完成（{len(transcript)} 字）")
+        return transcript
+    finally:
+        preprocessor.cleanup(str(path))
 
 
 def analyze_audio(path: Path, args: argparse.Namespace) -> dict:
-    from analyzer.audio import AudioModel
-
     print("[vLLM] 音频转写中...")
-    transcript = AudioModel(_audio_config(args)).transcribe(str(path))
+    transcript = _get_audio_model(args).transcribe(str(path))
     if not transcript:
         raise RuntimeError("音频转写失败，无法继续分析")
 
@@ -351,13 +455,17 @@ def main() -> None:
                         help="Whisper 推理精度（默认: bfloat16）")
     parser.add_argument("--language", default="",
                         help="Whisper 转写语言，留空自动检测")
+    parser.add_argument("--no-audio", dest="extract_audio_from_video",
+                        action="store_false", help="解析视频时不提取音轨转写")
+    parser.add_argument("--tmp-dir", default="tmp",
+                        help="视频音轨临时目录（默认: tmp）")
     parser.add_argument("--timeout", type=int, default=600,
                         help="HTTP 超时时间秒数（默认: 600）")
     parser.add_argument("--output-dir", default="results",
                         help="解析结果保存目录（默认: results）")
     parser.add_argument("--no-save", dest="save_results", action="store_false",
                         help="解析媒体时不保存结果文件")
-    parser.set_defaults(save_results=True)
+    parser.set_defaults(save_results=True, extract_audio_from_video=True)
     args = parser.parse_args()
 
     if args.interactive:

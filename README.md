@@ -1,36 +1,27 @@
 # 媒体分析器 - 功能一：单文件解析
 
-对单个视频、音频、图片文件进行深度分析，输出结构化 JSON，包括思考过程、事件和解读。
-
-本项目只负责功能一：单文件解析。不负责功能二：多模态文件集合解析，也不负责功能三：媒体文件真伪鉴别。
-
----
+对单个图片、视频或音频文件做多模态分析，输出结构化 JSON。本仓库只实现功能一：单文件解析；不实现多文件集合解析和真伪鉴别。
 
 ## 目录结构
 
 ```text
 media_analyzer/
-├── analyze.py              # CLI 入口
-├── requirements.txt        # Python 依赖
+├── analyze.py              # Transformers 后端 CLI
 ├── analyzer/
 │   ├── pipeline.py         # 主流程编排
 │   ├── vision.py           # Qwen3-VL 推理封装
 │   ├── audio.py            # Whisper 转写封装
-│   └── preprocessor.py     # ffmpeg/ffprobe 预处理工具
-├── scripts/
-│   ├── setup.sh            # conda 环境初始化
-│   ├── download_models.py  # 使用 ModelScope 批量下载模型
-│   └── start_vllm.sh       # 启动 vLLM 服务（可选）
-├── vllm_client.py          # vLLM HTTP 客户端（对话/媒体解析）
-├── results/                # 输出 JSON（自动创建）
-└── tmp/                    # 临时帧/音轨（自动清理）
+│   └── preprocessor.py     # ffmpeg/ffprobe 预处理
+├── eval/                   # vLLM 评测脚本
+├── scripts/                # 环境、模型下载、vLLM 启动脚本
+├── vllm_client.py          # vLLM HTTP 客户端
+├── results/                # 默认分析结果目录
+└── tmp/                    # 临时帧和音轨
 ```
-
----
 
 ## 快速开始
 
-### 第一步：初始化环境
+初始化环境：
 
 ```bash
 cd /data/media_analyzer
@@ -38,36 +29,13 @@ bash scripts/setup.sh
 conda activate media
 ```
 
-`scripts/setup.sh` 会创建或复用 `media` conda 环境，Python 版本为 3.12，并安装 ffmpeg 和 Python 依赖。
-
-PyTorch 会先按 `requirements.txt` 第 10 行的 CUDA 12.8 命令安装：
-
-```bash
-pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-```
-
-随后再安装 `requirements.txt` 中剩余依赖。当前 `requirements.txt` 固定 `vllm==0.19.1`，该版本匹配 `torch==2.10.0`、`torchvision==0.25.0`、`torchaudio==2.10.0` 和 CUDA 12.8；不要直接使用未固定版本的 `pip install vllm` 覆盖它。
-
-### 第二步：下载模型
+下载模型：
 
 ```bash
 python scripts/download_models.py
 ```
 
-当前脚本使用 ModelScope 下载模型到 `/data/models`。脚本会打印每个模型的实际保存路径：
-
-| ModelScope 模型 ID | 用途 |
-|------|------|
-| `Qwen/Qwen3-VL-2B-Instruct` | 2B 视觉/视频/文本推理模型 |
-| `Qwen/Qwen3-VL-4B-Instruct` | 更大视觉模型备选 |
-| `Qwen/Qwen3-VL-8B-Instruct` | 更大视觉模型备选 |
-| `openai-mirror/whisper-large-v3` | 音频转写 |
-
-当前 CLI 代码默认使用的本地路径是 `/data/models/Qwen3-VL-2B-Instruct` 和 `/data/models/large-v3`。如果你的实际模型保存路径不同，请在命令行显式传入 `--vision-model` 和 `--whisper-model`。
-
-### 第三步：运行分析
-
-推荐默认使用交互模式：
+默认推荐交互模式，模型只加载一次：
 
 ```bash
 python analyze.py --continue \
@@ -75,89 +43,58 @@ python analyze.py --continue \
   --whisper-model /data/models/whisper-large-v3
 ```
 
-进入交互模式后，输入待分析文件路径：
+进入交互模式后输入文件路径：
 
 ```text
-文件路径> /data/media_analyzer/demo_media/BigBuckBunny.mp4
-文件路径> /data/media_analyzer/demo_media/people.jpg
+文件路径> /data/media_analyzer/demo_media/holding_phone.mp4
+文件路径> /data/media_analyzer/demo_media/drug_interactions.jpg
 文件路径> /data/media_analyzer/demo_media/speech_audio.mp3
 ```
 
-交互模式会加载一次模型后持续处理多个文件，适合实际使用。输入 `q`、`quit`、`exit` 或按 `Ctrl+C` 退出。
-
-单次分析也仍然可用：
+单次分析：
 
 ```bash
-python analyze.py path/to/file.mp4
+python analyze.py path/to/file.mp4 \
+  --vision-model /data/models/Qwen3-VL-2B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
 ```
-
----
 
 ## 输出格式
 
-结果会打印到终端，并在默认情况下保存到 `results/<文件名>_result.json`：
+结果会打印到终端，并默认保存到 `results/<文件名>_result.json`。
+
+图片没有真实时间轴，`事件` 不带秒数前缀：
+
+```json
+{
+  "file": "example.jpg",
+  "思考过程": "画面中可见人群、标语和街道环境。",
+  "事件": [
+    "人群在街道上聚集并举起标语",
+    "现场呈现公共集会或抗议活动特征"
+  ],
+  "解读": "这是一张公共政治或社会活动现场图片。"
+}
+```
+
+视频和音频有时间轴，`事件` 保留秒数或秒数范围：
 
 ```json
 {
   "file": "example.mp4",
-  "思考过程": "1. 逐帧分析...; 2. 音频分析...; 3. 综合判断...",
+  "思考过程": "结合画面变化、音频转写和时序信息判断。",
   "事件": [
-    "0-8秒：...",
-    "9-15秒：..."
+    "0-8秒：人群聚集并面向舞台",
+    "9-15秒：演讲者开始发言"
   ],
-  "解读": "..."
+  "解读": "视频记录了一段公共演讲或集会活动。"
 }
 ```
 
----
-
-## 常用参数
-
-```text
-python analyze.py [file] [options]
-
-位置参数:
-  file                         待分析的媒体文件路径；交互模式下可省略
-
-模式:
-  --continue                   交互模式：加载一次模型后持续等待输入
-
-模型:
-  --vision-model MODEL         视觉模型路径或 Hugging Face / 本地模型 ID
-                               默认: /data/models/Qwen3-VL-2B-Instruct
-  --whisper-model MODEL        Whisper 模型路径或 Hugging Face / 本地模型 ID
-                               默认: /data/models/large-v3
-  --device DEVICE              auto/cuda/cpu/mps，默认: cuda
-  --dtype DTYPE                bfloat16/float16/float32，默认: bfloat16
-  --max-new-tokens N           最大生成 token 数，默认: 16384
-
-视频:
-  --short-video-threshold N    短视频阈值秒数，默认: 180
-  --extract-fps FPS            长视频提帧帧率，默认: 1.0
-  --max-frames N               最大提帧数，默认: 64
-  --max-pixels N               每帧最大像素数，默认: 151200
-
-音频:
-  --language LANG              Whisper 转写语言，留空自动检测
-  --no-audio                   不提取视频音轨转写
-
-输出:
-  --output-dir DIR             结果目录，默认: results
-  --no-save                    不保存结果文件
-  --quiet                      减少日志输出
-  --tmp-dir DIR                临时文件目录，默认: tmp
-  --no-cleanup                 运行结束后保留临时文件
-```
-
-示例：
+## 常用命令
 
 ```bash
-# 默认推荐：交互模式
-python analyze.py --continue \
-  --vision-model /data/models/Qwen3-VL-2B-Instruct \
-  --whisper-model /data/models/whisper-large-v3
-
-# 指定 4B 模型
+# 指定 4B 视觉模型
 python analyze.py --continue \
   --vision-model /data/models/Qwen3-VL-4B-Instruct \
   --whisper-model /data/models/whisper-large-v3
@@ -165,140 +102,80 @@ python analyze.py --continue \
 # 仅打印结果，不保存文件
 python analyze.py image.png --no-save --quiet
 
-# 不转写视频音轨
+# 视频不提取音轨
 python analyze.py video.mp4 --no-audio
+
+# 保留临时帧/音轨，便于排查
+python analyze.py video.mp4 --no-cleanup
 ```
 
----
-
-## 实现流程
-
-`analyze.py` 构造配置字典并调用 `MediaAnalyzer`。当前没有 `config.yaml` 配置入口。
-
-处理逻辑：
-
-1. `MediaPreprocessor.detect_type()` 通过文件扩展名识别图片、视频或音频。
-2. 图片直接调用 `VisionModel.analyze_image()`。
-3. 视频先用 `ffprobe` 获取时长，并按参数决定是否提取音轨转写。
-4. 短视频（默认不超过 180 秒）直接交给视觉模型原生处理。
-5. 长视频通过 `ffmpeg` 提帧后交给视觉模型处理。
-6. 纯音频先用 Whisper 转写，再把文本交给视觉/文本模型做结构化分析。
-7. 默认保存 JSON 到 `results/`，并清理 `tmp/` 下的临时文件。
-
----
-
-## 硬件需求
-
-| 硬件 | 可用性 | 备注 |
-|------|--------|------|
-| H200 / A100 / RTX 4090 24GB+ | 推荐 | 适合 `bfloat16` 和较大模型 |
-| 12GB-24GB GPU | 可用 | 建议使用 `float16` 或较小模型 |
-| Mac M 系列 | 可用 | 可尝试 `--device mps --dtype float32` |
-| 纯 CPU | 可用 | 速度会很慢，仅建议调试小文件 |
-
-显存不足时，优先降低 `--max-frames`、降低 `--max-pixels`，或改用更小的视觉模型。
-
----
-
-## 高吞吐模式（vLLM，可选）
-
-本项目使用的 vLLM 版本：
-
-```bash
-pip install vllm==0.19.1 --extra-index-url https://download.pytorch.org/whl/cu128
-```
-
-该版本与项目推荐的 PyTorch 版本匹配：
-
-```bash
-pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url https://download.pytorch.org/whl/cu128
-```
-
-如果 `nvidia-smi` 能看到 GPU，但 Python 看不到 CUDA，先检查当前环境：
-
-```bash
-python -c "import torch; print(torch.__version__); print(torch.version.cuda); print(torch.backends.cuda.is_built()); print(torch.cuda.is_available())"
-```
-
-批量处理场景下可以启动 vLLM 服务：
-
-```bash
-bash scripts/start_vllm.sh
-```
-
-默认模型路径：
+常用参数：
 
 ```text
-/data/models/Qwen3-VL-4B-Instruct
+--vision-model MODEL          视觉模型路径，默认 /data/models/Qwen3-VL-2B-Instruct
+--whisper-model MODEL         Whisper 模型路径；建议显式传 /data/models/whisper-large-v3
+--device DEVICE               auto/cuda/cpu/mps，默认 cuda
+--dtype DTYPE                 bfloat16/float16/float32，默认 bfloat16
+--max-new-tokens N            最大生成 token 数，默认 16384
+--short-video-threshold N     短视频阈值秒数，默认 180
+--extract-fps FPS             长视频提帧帧率，默认 1.0
+--max-frames N                最大提帧数，默认 64
+--max-pixels N                每帧最大像素数，默认 151200
+--language LANG               Whisper 转写语言，留空自动检测
+--no-audio                    不提取视频音轨
+--output-dir DIR              结果目录，默认 results
 ```
 
-也可以指定模型路径：
+## 处理流程
+
+1. 通过扩展名识别图片、视频或音频。
+2. 图片直接交给视觉模型分析，事件不加时间前缀。
+3. 视频先取时长，默认提取音轨并用 Whisper 转写；无音轨时跳过音频。
+4. 短视频直接传给视觉模型；长视频先用 ffmpeg 抽帧。
+5. 音频先转写，再把文本交给模型做结构化分析。
+
+显存不足时优先降低 `--max-frames`、`--max-pixels`，或改用更小模型。
+
+## vLLM 模式
+
+启动 vLLM 服务：
 
 ```bash
 bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
 ```
 
-默认地址为 `http://127.0.0.1:8011`，可通过环境变量覆盖：
+默认地址是 `http://127.0.0.1:8011`，可用环境变量覆盖：
 
 ```bash
-PORT=8001 bash scripts/start_vllm.sh
+PORT=8001 bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
 ```
 
-服务启动后，可通过 OpenAI 兼容接口调用：`http://127.0.0.1:8011`。
-
-也可以使用项目内的 vLLM 客户端脚本。交互模式下，输入普通文本会进行连续对话；输入存在的图片/视频/音频路径会进行结构化解析。音频会先用本地 Whisper 转写，再把转写文本提交给 vLLM 分析：
+使用 vLLM 客户端解析媒体或对话：
 
 ```bash
 python vllm_client.py --continue
-```
-
-`vllm_client.py` 的默认配置与 vLLM 启动脚本保持一致：
-
-```text
-base_url: http://127.0.0.1:8011/v1
-model: /data/models/Qwen3-VL-4B-Instruct
-whisper_model: /data/models/whisper-large-v3
-```
-
-单次对话：
-
-```bash
-python vllm_client.py "帮我写个小的科幻故事"
-```
-
-单次解析图片、视频或音频，文件路径建议使用绝对路径：
-
-```bash
-python vllm_client.py /data/media_analyzer/demo_media/people.jpg
+python vllm_client.py /data/media_analyzer/demo_media/drug_interactions.jpg
 python vllm_client.py /data/media_analyzer/demo_media/holding_phone.mp4
 python vllm_client.py /data/media_analyzer/demo_media/speech_audio.mp3
 ```
 
----
+`vllm_client.py` 对音频文件会先本地 Whisper 转写；对视频默认也会提取音轨并转写后与视觉内容一起分析。需要关闭视频音轨时传 `--no-audio`。
 
 ## 功能一评测
 
-本仓库提供一套基于 vLLM 的轻量评测脚本，用于对比 2B / 4B / 8B 等模型，统计图片、短视频和音频的解析耗时及基础输出质量。评测脚本只调用 vLLM OpenAI-compatible 接口，不走本地 `VisionModel` / Transformers 视觉模型加载路径。
+评测脚本使用 vLLM OpenAI-compatible 接口，不走本地 Transformers 视觉模型加载路径。
 
-下载一批偏政治事件媒体样本到 `demo_media/political_events/`，并生成 `eval/manifest.jsonl`。默认会下载 10 张图片、10 个 60 秒以内的视频、10 个 60 秒以内的音频：
+评测数据清单已在 `eval/manifest.jsonl`。如需重新下载样本：
 
 ```bash
 python eval/download_eval_media.py
 ```
 
-当前 `eval/manifest.jsonl` 已经包含一份 30 条样本清单。如果只是复现实验，不需要重复下载数据。
-
-vLLM 的一个 `vllm serve` 进程通常只服务一个基座模型。做 2B / 4B / 8B 对比时，建议按模型逐个启动服务、逐个跑评测，并用 `--append` 把结果追加到同一个 metrics 文件。
-
-示例：评测 4B 模型。
+一个 vLLM 服务通常只加载一个模型。对比多个模型时，逐个启动服务并运行评测；每个模型的结果会自动进入自己的目录。
 
 ```bash
 bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
-```
 
-另开一个终端运行：
-
-```bash
 python eval/benchmark_vllm.py \
   --manifest eval/manifest.jsonl \
   --base-url http://127.0.0.1:8011/v1 \
@@ -306,7 +183,7 @@ python eval/benchmark_vllm.py \
   --whisper-model /data/models/whisper-large-v3
 ```
 
-切换到下一个模型时，停止当前 vLLM 服务，重新启动对应模型，然后追加写入评测结果：
+切换模型后重复运行：
 
 ```bash
 bash scripts/start_vllm.sh /data/models/Qwen3-VL-8B-Instruct
@@ -315,41 +192,45 @@ python eval/benchmark_vllm.py \
   --manifest eval/manifest.jsonl \
   --base-url http://127.0.0.1:8011/v1 \
   --models /data/models/Qwen3-VL-8B-Instruct \
-  --whisper-model /data/models/whisper-large-v3 \
-  --append
+  --whisper-model /data/models/whisper-large-v3
 ```
 
-如果机器显存足够，也可以手动启动多个 vLLM 进程，分别绑定不同 GPU 和端口；但当前评测脚本一次只接收一个 `--base-url`，所以仍建议分别运行并用 `--append` 合并结果。
+默认输出结构：
 
-汇总指标：
+```text
+eval/benchmark_results/
+├── Qwen3-VL-4B-Instruct/
+│   ├── benchmark_metrics.jsonl
+│   ├── benchmark_scored.jsonl
+│   └── *_vllm_result.json
+├── Qwen3-VL-8B-Instruct/
+│   ├── benchmark_metrics.jsonl
+│   ├── benchmark_scored.jsonl
+│   └── *_vllm_result.json
+└── summary/
+    ├── benchmark_summary.csv
+    └── benchmark_summary.md
+```
+
+重复评测同一个模型时，会重写该模型目录下的 `benchmark_metrics.jsonl` 和结果文件。
+
+汇总所有模型目录：
 
 ```bash
 python eval/summarize_benchmark.py \
-  --metrics eval/benchmark_metrics.jsonl \
+  --metrics-dir eval/benchmark_results \
   --manifest eval/manifest.jsonl
 ```
 
-输出包括：
-
-- `eval/benchmark_metrics.jsonl`：逐文件耗时、成功/失败、媒体类型、视频时长分桶。
-- `eval/benchmark_scored.jsonl`：逐文件 JSON 合规、schema 合规、事件秒数前缀、关键词召回。
-- `eval/benchmark_summary.csv` 和 `eval/benchmark_summary.md`：按模型、媒体类型、视频时长分桶聚合的整体指标。
-
-
-`analyze.py` 当前仍使用 transformers 后端；如需切换到 vLLM，需要在 `analyzer/vision.py` 中替换推理调用。
-
----
+汇总指标按模型、媒体类型、视频时长分桶聚合；图片检查事件不带时间前缀，视频/音频检查事件带时间前缀。
 
 ## 常见问题
 
-**Q: CUDA out of memory**  
-A: 降低 `--max-frames`，降低 `--max-pixels`，改用更小的视觉模型，或把 `--dtype` 改为 `float16`。
+**CUDA out of memory**
+降低 `--max-frames`、`--max-pixels`，改用更小模型，或把 `--dtype` 改为 `float16`。
 
-**Q: 视频无音轨怎么办？**  
-A: 正常。音轨提取失败时 pipeline 会跳过音频步骤，仅做视觉分析。
+**视频无音轨怎么办？**
+正常。音轨提取失败时会跳过音频步骤，仅做视觉分析。
 
-**Q: 输出 JSON 格式错误怎么办？**  
-A: 偶发于模型输出不规范时。相关容错逻辑在 `analyzer/vision.py` 的 `_extract_json()`。
-
-**Q: `download_models.py` 找不到 `modelscope` 怎么办？**  
-A: 在 `media` 环境中安装：`pip install modelscope`，然后重新运行下载脚本。
+**输出 JSON 格式错误怎么办？**
+模型偶发输出不规范时会触发 JSON 解析错误；容错逻辑在 `analyzer/vision.py` 的 `_extract_json()`。

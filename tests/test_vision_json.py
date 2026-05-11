@@ -30,6 +30,7 @@ from analyzer.vision import (
     ModelOutputJSONError,
     _extract_json,
     _frame_timing_context,
+    _normalize_image_result,
     _timing_rule,
 )
 
@@ -69,6 +70,22 @@ class ExtractJSONTests(unittest.TestCase):
 
         self.assertIn("起始秒-结束秒", rule)
         self.assertIn("0 到 15.2 秒", rule)
+
+    def test_image_timing_rule_forbids_second_prefix(self):
+        rule = _timing_rule("image")
+
+        self.assertIn("不要以", rule)
+        self.assertIn("0秒", rule)
+
+    def test_image_result_strips_second_prefix(self):
+        result = _normalize_image_result({
+            "file": "a.jpg",
+            "思考过程": "依据",
+            "事件": ["0秒：人群聚集", "10-12秒：举起标语"],
+            "解读": "解读",
+        })
+
+        self.assertEqual(result["事件"], ["人群聚集", "举起标语"])
 
     def test_frame_timing_context_lists_frame_seconds(self):
         context = _frame_timing_context([

@@ -120,21 +120,25 @@ def _client_args(args: argparse.Namespace, model: str) -> argparse.Namespace:
         whisper_device=args.whisper_device,
         whisper_dtype=args.whisper_dtype,
         language=args.language,
+        extract_audio_from_video=getattr(args, "extract_audio_from_video", True),
+        tmp_dir=getattr(args, "tmp_dir", "tmp"),
     )
 
 
 def run(args: argparse.Namespace) -> int:
     manifest_path = _resolve_path(args.manifest)
     output_root = _resolve_path(args.output_dir)
-    metrics_path = _resolve_path(args.metrics_path)
+    metrics_path = _resolve_path(args.metrics_path) if getattr(args, "metrics_path", None) else None
     items = _load_manifest(manifest_path, args.limit)
     if not items:
         raise ValueError(f"manifest 为空: {manifest_path}")
 
     append = args.append
+    written_metrics: list[Path] = []
     for model in args.models:
         slug = _model_slug(model)
         model_output_dir = output_root / slug
+        model_metrics_path = metrics_path or model_output_dir / "benchmark_metrics.jsonl"
         client_args = _client_args(args, model)
         rows: list[dict[str, Any]] = []
 
@@ -180,10 +184,13 @@ def run(args: argparse.Namespace) -> int:
                 row["latency_seconds"] = round(time.perf_counter() - start, 3)
                 rows.append(row)
 
-        _write_jsonl(metrics_path, rows, append=append)
-        append = True
+        _write_jsonl(model_metrics_path, rows, append=append)
+        written_metrics.append(model_metrics_path)
+        if metrics_path:
+            append = True
 
-    print(f"[Benchmark:vLLM] 指标已写入: {metrics_path}")
+    for path in written_metrics:
+        print(f"[Benchmark:vLLM] 指标已写入: {path}")
     return 0
 
 
@@ -199,10 +206,13 @@ def main() -> int:
     parser.add_argument("--whisper-device", default="cuda", choices=["auto", "cuda", "cpu", "mps"])
     parser.add_argument("--whisper-dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
     parser.add_argument("--language", default="")
+    parser.add_argument("--no-audio", dest="extract_audio_from_video", action="store_false", help="解析视频时不提取音轨转写")
+    parser.add_argument("--tmp-dir", default="tmp")
     parser.add_argument("--output-dir", default="eval/benchmark_results")
-    parser.add_argument("--metrics-path", default="eval/benchmark_metrics.jsonl")
+    parser.add_argument("--metrics-path", default=None, help="兼容旧用法：显式指定单个 metrics JSONL")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--append", action="store_true", help="追加写入 metrics，而不是覆盖")
+    parser.set_defaults(extract_audio_from_video=True)
     return run(parser.parse_args())
 
 

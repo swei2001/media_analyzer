@@ -17,6 +17,11 @@
 }
 ```
 
+事件字段的时间规则：
+
+- 图片没有真实时间轴，`事件` 不应带 `0秒：` 或其他秒数前缀。
+- 视频和音频有时间轴，`事件` 应带秒数或秒数范围前缀。
+
 ## 代码结构
 
 - `analyze.py`：CLI 入口，解析命令行参数，构造配置字典，实例化 `MediaAnalyzer`。
@@ -28,6 +33,8 @@
 - `scripts/download_models.py`：使用 ModelScope 批量下载模型到 `/data/models`。
 - `scripts/start_vllm.sh`：激活 `media` conda 环境并启动可选 vLLM 服务。
 - `vllm_client.py`：vLLM HTTP 客户端，支持普通文本对话，以及图片/视频/音频路径解析。
+- `eval/benchmark_vllm.py`：vLLM 批量评测入口，默认按模型目录写结果。
+- `eval/summarize_benchmark.py`：遍历模型评测目录并汇总指标。
 - `demo_media/`：示例媒体文件，已在 `.gitignore` 中忽略。
 
 ## 当前实现流程
@@ -35,7 +42,7 @@
 `analyze.py` 调用 `analyzer.MediaAnalyzer`：
 
 1. `MediaPreprocessor.detect_type()` 通过扩展名识别 `image`、`video` 或 `audio`。
-2. 图片直接调用 `VisionModel.analyze_image()`。
+2. 图片直接调用 `VisionModel.analyze_image()`，事件不带秒数前缀。
 3. 视频先用 `ffprobe` 获取时长，并可用 `ffmpeg` 提取音轨转写。
 4. 短视频（默认 `<=180s`）调用 `VisionModel.analyze_video_native()`。
 5. 长视频提帧后调用 `VisionModel.analyze_frames()`。
@@ -96,6 +103,27 @@ python analyze.py <file_path> [options]
 - `--language`、`--no-audio`：音频转写参数。
 - `--output-dir`、`--no-save`、`--quiet`、`--tmp-dir`、`--no-cleanup`：输出和临时文件参数。
 
+vLLM 评测默认输出结构：
+
+```text
+eval/benchmark_results/
+├── <model_slug>/
+│   ├── benchmark_metrics.jsonl
+│   ├── benchmark_scored.jsonl
+│   └── *_vllm_result.json
+└── summary/
+    ├── benchmark_summary.csv
+    └── benchmark_summary.md
+```
+
+重复评测同一个模型时，会重写该模型目录下的 metrics 和结果文件。汇总时使用：
+
+```bash
+python eval/summarize_benchmark.py \
+  --metrics-dir eval/benchmark_results \
+  --manifest eval/manifest.jsonl
+```
+
 ## 重要注意事项
 
 - 不要在本地 Bash 中直接运行重型或实验性模型推理命令，包括：
@@ -110,7 +138,8 @@ python analyze.py <file_path> [options]
 - `requirements.txt` 固定 `vllm==0.19.1`，匹配 `torch==2.10.0` / CUDA 12.8；不要用未固定版本的 `pip install vllm` 覆盖。
 - `scripts/start_vllm.sh` 依赖 `media` 环境中已安装 `vllm`，不会自动安装 `vllm`。
 - `scripts/start_vllm.sh` 默认模型为 `/data/models/Qwen3-VL-4B-Instruct`，默认监听 `127.0.0.1:8011`；也可通过第一个参数指定模型路径，通过 `HOST=` 和 `PORT=` 覆盖监听地址。
-- `vllm_client.py` 默认连接 `http://127.0.0.1:8011/v1`，默认模型为 `/data/models/Qwen3-VL-4B-Instruct`，音频路径会先用本地 Whisper 转写再提交给 vLLM。
+- `vllm_client.py` 默认连接 `http://127.0.0.1:8011/v1`，默认模型为 `/data/models/Qwen3-VL-4B-Instruct`。音频文件会先用本地 Whisper 转写再提交给 vLLM；视频默认也会先提取音轨并转写，可用 `--no-audio` 关闭。
+- `vllm_client.py` 会按 Whisper 模型、设备、dtype 和语言缓存 `AudioModel`；不要在每次转写时重新实例化 Whisper。
 - `MediaPreprocessor.get_video_duration()` 没有检查 `ffprobe` 返回码；修改相关逻辑时应考虑异常处理。
 - `VisionModel._load()` 将 `device_map` 直接设为配置中的 `device` 字符串；如调整设备逻辑，注意兼容 `auto`、`cuda`、`cpu`、`mps`。
 - `AudioModel` 当前用 `transformers` ASR pipeline，而不是 `requirements.txt` 注释中的 faster-whisper 主路径。
@@ -119,16 +148,11 @@ python analyze.py <file_path> [options]
 ## 开发约定
 
 - 保持输出 JSON 的中文键名不变，除非用户明确要求变更接口。
+- 保持图片事件无秒数前缀；保持视频/音频事件有秒数或秒数范围前缀。
 - 修改 pipeline 时同时考虑图片、短视频、长视频、纯音频四条路径。
-- 与模型提示词相关的修改集中在 `analyzer/vision.py`。
+- 与 Transformers 后端提示词相关的修改集中在 `analyzer/vision.py`；与 vLLM 提示词相关的修改同步检查 `vllm_client.py`。
 - 与媒体预处理和临时文件相关的修改集中在 `analyzer/preprocessor.py`。
+- 修改评测输出结构时同步检查 `eval/benchmark_vllm.py`、`eval/summarize_benchmark.py`、`README.md` 和相关测试。
 - 避免把生成结果、临时帧、模型文件或示例媒体加入版本控制；这些路径和大文件类型已在 `.gitignore` 中忽略。
 - 如果新增测试，优先 mock 掉模型加载和 `ffmpeg`/`ffprobe` 调用，避免测试实际加载大模型或处理大文件。
 
-## 已知待办方向
-
-本项目待办仅限功能一范围：
-
-- 对比更多模型，例如 8B 级模型。
-- 统计图片、短视频、长视频解析耗时。
-- 寻找偏政治事件的数据集并统计整体指标。
