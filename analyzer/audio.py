@@ -116,7 +116,6 @@ class AudioModel:
                 audio_path,
                 generate_kwargs=generate_kwargs,
                 return_timestamps=True,
-                clean_up_tokenization_spaces=False,
             )
             return self._format_transcript(result)
         except Exception as e:

@@ -274,6 +274,68 @@ python vllm_client.py /data/media_analyzer/demo_media/holding_phone.mp4
 python vllm_client.py /data/media_analyzer/demo_media/speech_audio.mp3
 ```
 
+---
+
+## 功能一评测
+
+本仓库提供一套基于 vLLM 的轻量评测脚本，用于对比 2B / 4B / 8B 等模型，统计图片、短视频和音频的解析耗时及基础输出质量。评测脚本只调用 vLLM OpenAI-compatible 接口，不走本地 `VisionModel` / Transformers 视觉模型加载路径。
+
+下载一批偏政治事件媒体样本到 `demo_media/political_events/`，并生成 `eval/manifest.jsonl`。默认会下载 10 张图片、10 个 60 秒以内的视频、10 个 60 秒以内的音频：
+
+```bash
+python eval/download_eval_media.py
+```
+
+当前 `eval/manifest.jsonl` 已经包含一份 30 条样本清单。如果只是复现实验，不需要重复下载数据。
+
+vLLM 的一个 `vllm serve` 进程通常只服务一个基座模型。做 2B / 4B / 8B 对比时，建议按模型逐个启动服务、逐个跑评测，并用 `--append` 把结果追加到同一个 metrics 文件。
+
+示例：评测 4B 模型。
+
+```bash
+bash scripts/start_vllm.sh /data/models/Qwen3-VL-4B-Instruct
+```
+
+另开一个终端运行：
+
+```bash
+python eval/benchmark_vllm.py \
+  --manifest eval/manifest.jsonl \
+  --base-url http://127.0.0.1:8011/v1 \
+  --models /data/models/Qwen3-VL-4B-Instruct \
+  --whisper-model /data/models/whisper-large-v3
+```
+
+切换到下一个模型时，停止当前 vLLM 服务，重新启动对应模型，然后追加写入评测结果：
+
+```bash
+bash scripts/start_vllm.sh /data/models/Qwen3-VL-8B-Instruct
+
+python eval/benchmark_vllm.py \
+  --manifest eval/manifest.jsonl \
+  --base-url http://127.0.0.1:8011/v1 \
+  --models /data/models/Qwen3-VL-8B-Instruct \
+  --whisper-model /data/models/whisper-large-v3 \
+  --append
+```
+
+如果机器显存足够，也可以手动启动多个 vLLM 进程，分别绑定不同 GPU 和端口；但当前评测脚本一次只接收一个 `--base-url`，所以仍建议分别运行并用 `--append` 合并结果。
+
+汇总指标：
+
+```bash
+python eval/summarize_benchmark.py \
+  --metrics eval/benchmark_metrics.jsonl \
+  --manifest eval/manifest.jsonl
+```
+
+输出包括：
+
+- `eval/benchmark_metrics.jsonl`：逐文件耗时、成功/失败、媒体类型、视频时长分桶。
+- `eval/benchmark_scored.jsonl`：逐文件 JSON 合规、schema 合规、事件秒数前缀、关键词召回。
+- `eval/benchmark_summary.csv` 和 `eval/benchmark_summary.md`：按模型、媒体类型、视频时长分桶聚合的整体指标。
+
+
 `analyze.py` 当前仍使用 transformers 后端；如需切换到 vLLM，需要在 `analyzer/vision.py` 中替换推理调用。
 
 ---

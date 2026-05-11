@@ -2,6 +2,11 @@
 results/
 tmp/
 demo_media/
+eval/benchmark_results/
+eval/benchmark_metrics.jsonl
+eval/benchmark_scored.jsonl
+eval/benchmark_summary.csv
+eval/benchmark_summary.md
 
 # --- Python ---
 __pycache__/
